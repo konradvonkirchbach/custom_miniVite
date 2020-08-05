@@ -343,7 +343,7 @@ class BinaryEdgeList
             M_local_ = ((M_*(me + 1)) / nprocs) - ((M_*me) / nprocs); 
 
             // create local graph
-            Graph *g = new Graph(M_local_, 0, M_, N_);
+            Graph *g = new Graph(M_local_, 0, M_, N_, comm_);
 
             // Let N = array length and P = number of processors.
             // From j = 0 to P-1,
@@ -505,7 +505,7 @@ class BinaryEdgeList
             M_local_ = mbins[me+1] - mbins[me];
 
             // create local graph
-            Graph *g = new Graph(M_local_, 0, M_, N_);
+            Graph *g = new Graph(M_local_, 0, M_, N_, comm_);
             // readjust parts with new vertex partition
             g->repart(mbins);
 
@@ -673,7 +673,7 @@ class GenerateRGG
             assert(hi > lo);
 
             // measure the time to generate random numbers
-            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Barrier(comm_);
             double st = MPI_Wtime();
 
             if (!isLCG) {

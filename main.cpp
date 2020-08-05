@@ -53,6 +53,7 @@
 #include <omp.h>
 #include <mpi.h>
 
+#include "AutoTunerConnection.hpp"
 #include "dspl.hpp"
 
 static std::string inputFileName;
@@ -71,7 +72,7 @@ static void parseCommandLine(const int argc, char * const argv[]);
 
 int main(int argc, char *argv[])
 {
-  double t0, t1, t2, t3, ti = 0.0;
+  double t0, t1, t2, t3, ti = 0.0, solverTime = 0;
   int max_threads;
 
   max_threads = omp_get_max_threads();
@@ -86,97 +87,131 @@ int main(int argc, char *argv[])
   } else {
       MPI_Init(&argc, &argv);
   }
-  
-  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-  MPI_Comm_rank(MPI_COMM_WORLD, &me);
+
+  int w_rank, w_size;
+  MPI_Comm_size(MPI_COMM_WORLD, &w_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &w_rank);
 
   parseCommandLine(argc, argv);
 
-  createCommunityMPIType();
-  double td0, td1, td, tdt;
+  //			Stuff for autotuner
+  int socket = openTunerConnectionInit();
+  int flag = 1, newRank, color;
+  MPI_Comm permComm;
 
-  MPI_Barrier(MPI_COMM_WORLD);
-  td0 = MPI_Wtime();
+  //While loop?
+  while (true) {
+    color = 0;
+    //Check if continue to benchmark
+    openTunerSignalRecv(socket, flag);
+    if (flag != 1)
+      break;
+    newRank = openTunerGetNewRank(socket);
+    if (newRank < 0)
+      color = MPI_UNDEFINED;
+    MPI_Comm_split(MPI_COMM_WORLD, color, newRank, &permComm);
 
-  Graph* g = nullptr;
+    if (color != MPI_UNDEFINED) {
+	  MPI_Comm_size(permComm, &nprocs);
+	  MPI_Comm_rank(permComm, &me);
 
-  // generate graph only supports RGG as of now
-  if (generateGraph) { 
-      GenerateRGG gr(nvRGG);
-      g = gr.generate(randomNumberLCG, isUnitEdgeWeight, randomEdgePercent);
-      //g->print(false);
-  }
-  else { // read input graph
-      BinaryEdgeList rm;
-      if (readBalanced == true)
-          g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName);
-      else
-          g = rm.read(me, nprocs, ranksPerNode, inputFileName);
-      //g->print();
-  }
+	  createCommunityMPIType();
+	  double td0, td1, td, tdt;
 
-  assert(g != nullptr);
-#ifdef PRINT_DIST_STATS 
-  g->print_dist_stats();
+	  MPI_Barrier(permComm);
+	  td0 = MPI_Wtime();
+
+	  Graph *g = nullptr;
+
+	  // generate graph only supports RGG as of now
+	  if (generateGraph) {
+		GenerateRGG gr(nvRGG);
+		g = gr.generate(randomNumberLCG, isUnitEdgeWeight, randomEdgePercent);
+		//g->print(false);
+	  } else { // read input graph
+		BinaryEdgeList rm(permComm);
+		if (readBalanced == true)
+		  g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName);
+		else
+		  g = rm.read(me, nprocs, ranksPerNode, inputFileName);
+		//g->print();
+	  }
+
+	  assert(g != nullptr);
+#ifdef PRINT_DIST_STATS
+	  g->print_dist_stats();
 #endif
 
-  MPI_Barrier(MPI_COMM_WORLD);
-#ifdef DEBUG_PRINTF  
-  assert(g);
-#endif  
-  td1 = MPI_Wtime();
-  td = td1 - td0;
-
-  MPI_Reduce(&td, &tdt, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
- 
-  if (me == 0)  {
-      if (!generateGraph)
-          std::cout << "Time to read input file and create distributed graph (in s): " 
-              << (tdt/nprocs) << std::endl;
-      else
-          std::cout << "Time to generate distributed graph of " 
-              << nvRGG << " vertices (in s): " << (tdt/nprocs) << std::endl;
-  }
-
-  GraphWeight currMod = -1.0;
-  GraphWeight prevMod = -1.0;
-  double total = 0.0;
-
-  std::vector<GraphElem> ssizes, rsizes, svdata, rvdata;
-#if defined(USE_MPI_RMA)
-  MPI_Win commwin;
+	  MPI_Barrier(permComm);
+#ifdef DEBUG_PRINTF
+	  assert(g);
 #endif
-  size_t ssz = 0, rsz = 0;
-  int iters = 0;
-    
-  MPI_Barrier(MPI_COMM_WORLD);
+	  td1 = MPI_Wtime();
+	  td = td1 - td0;
 
-  t1 = MPI_Wtime();
+	  //Using a mean as a time over all processes!
+	  MPI_Reduce(&td, &tdt, 1, MPI_DOUBLE, MPI_SUM, 0, permComm);
+
+	  if (me == 0) {
+		if (!generateGraph)
+		  std::cout << "Time to read input file and create distributed graph (in s): "
+					<< (tdt / nprocs) << std::endl;
+		else
+		  std::cout << "Time to generate distributed graph of "
+					<< nvRGG << " vertices (in s): " << (tdt / nprocs) << std::endl;
+	  }
+
+	  GraphWeight currMod = -1.0;
+	  GraphWeight prevMod = -1.0;
+	  double total = 0.0;
+
+	  std::vector <GraphElem> ssizes, rsizes, svdata, rvdata;
+#if defined(USE_MPI_RMA)
+	  MPI_Win commwin;
+#endif
+	  size_t ssz = 0, rsz = 0;
+	  int iters = 0;
+
+	  MPI_Barrier(permComm);
+
+	  t1 = MPI_Wtime();
 
 #if defined(USE_MPI_RMA)
-  currMod = distLouvainMethod(me, nprocs, *g, ssz, rsz, ssizes, rsizes, 
-                svdata, rvdata, currMod, threshold, iters, commwin);
+	  currMod = distLouvainMethod(me, nprocs, *g, ssz, rsz, ssizes, rsizes,
+					svdata, rvdata, currMod, threshold, iters, commwin);
 #else
-  currMod = distLouvainMethod(me, nprocs, *g, ssz, rsz, ssizes, rsizes, 
-                svdata, rvdata, currMod, threshold, iters);
+	  currMod = distLouvainMethod(me, nprocs, *g, ssz, rsz, ssizes, rsizes,
+								  svdata, rvdata, currMod, threshold, iters);
 #endif
-  MPI_Barrier(MPI_COMM_WORLD);
-  t0 = MPI_Wtime();
-  
-  if(me == 0) {
-      std::cout << "Modularity: " << currMod << ", Iterations: " 
-          << iters << ", Time (in s): "<<t0-t1<< std::endl;
+	  MPI_Barrier(permComm);
+	  t0 = MPI_Wtime();
+	  solverTime = t0 - t1;
 
-      std::cout << "**********************************************************************" << std::endl;
+	  if (me == 0) {
+		std::cout << "Modularity: " << currMod << ", Iterations: "
+				  << iters << ", Time (in s): " << t0 - t1 << std::endl;
+
+		std::cout << "**********************************************************************" << std::endl;
+	  }
+
+	  MPI_Barrier(permComm);
+
+	  double tot_time = 0.0;
+	  MPI_Reduce(&total, &tot_time, 1, MPI_DOUBLE, MPI_SUM, 0, permComm);
+	  delete g;
+	  destroyCommunityMPIType();
+	  MPI_Comm_free(&permComm);
+	}
+
+	if (me == 0 && color != MPI_UNDEFINED) {
+	  MPI_Send(&solverTime, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+	}
+	if (w_rank == 0){
+	  MPI_Recv(&solverTime, 1, MPI_DOUBLE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	}
+	openTunerSendTime<double>(socket, solverTime);
   }
-
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  double tot_time = 0.0;
-  MPI_Reduce(&total, &tot_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-  
-  delete g;
-  destroyCommunityMPIType();
+  //End of while loop
 
   MPI_Finalize();
 
