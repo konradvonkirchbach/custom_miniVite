@@ -9,6 +9,64 @@ from simpleGraph import simpleGraph
 import math
 
 
+def translate_permutation_to_rankfile(p, n_nodes, ppn, filename='RankFile.txt'):
+    n_cores_per_socket = ppn // 2
+    starting_node = 37 - n_nodes
+
+    rankDict = {}
+
+    for core, rank in enumerate(p):
+        rankDict[rank] = core
+
+    with open(filename, "w") as f:
+        for rank in range(len(p)):
+            i = rankDict[rank]
+            node_id = starting_node + i // ppn
+            socket_id = i % ppn // n_cores_per_socket
+            core_id = (i % ppn) % n_cores_per_socket
+            hydraName = 'hydra'
+            if node_id < 10:
+                hydraName += '0' + str(node_id)
+            else:
+                hydraName += str(node_id)
+            f.write("rank {}={} slot={}:{}\n".format(rank, hydraName, socket_id, core_id))
+    print('Wrote ranke file')
+
+
+def getPrimes(n):
+    primes = []
+    # Print the number of two's that divide n
+    while n % 2 == 0:
+        primes.append(2)
+        n = n / 2
+
+    # n must be odd at this point
+    # so a skip of 2 ( i = i + 2) can be used
+    for i in range(3, int(math.sqrt(n)) + 1, 2):
+        i = int(i)
+        # while i divides n , print i ad divide n
+        while n % i == 0:
+            primes.append(i)
+            n = n / i
+
+    # Condition if n is a prime
+    # number greater than 2
+    if n > 2:
+        primes.append(int(n))
+
+    return primes
+
+def getCartDims(p, ndims=2):
+    primes = getPrimes(p)
+    dims = [1 for _ in range(ndims)]
+    for prime in sorted(primes, reverse=True):
+        minimum = min(dims)
+        index = dims.index(minimum)
+        dims[index] *= prime
+    dims.sort(reverse=True)
+    return dims
+
+
 def getNumberOfNodesUsed(p):
     """
     Given a permutation p, with possible unassigned cores, denoted with -1,

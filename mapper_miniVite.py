@@ -87,7 +87,7 @@ class Mapper(MeasurementInterface):
 
         # start the mpi process
         cmds = ["srun", "-m", "block:cyclic", '--cpu-freq', 'High', '--cpu-bind', 'core', "-N", str(self.n_nodes),
-                "--ntasks-per-node", "{}".format(self.pps * self.n_sockets), \
+                "--ntasks-per-node", "{}".format(self.pps * self.n_sockets), '-p', 'q_staff_lowip_long',\
                 "-t", self.mpi_time, './' + args.application_name] + args.application_inputs.split(' ')
 
         try:
@@ -99,6 +99,8 @@ class Mapper(MeasurementInterface):
             #self.proc = subprocess.Popen(cmds)
             self.con, self.addr = s.accept()
             self.log.info(HIGHLIGHTER + "Established connection" + HIGHLIGHTER)
+
+            self.warm_up()
         except RuntimeError:
             print(RuntimeError)
             self.log.error("KILLED PROCESS!")
@@ -113,6 +115,25 @@ class Mapper(MeasurementInterface):
         except:
             self.log.warning("Could not kill connection")
 
+
+    def warm_up(self):
+        p = [i for i in range(self.processes)]
+        slave_input_perm = ' '.join([str(i) for i in p])
+        slave_input_perm += '\n'
+        slave_input_flag = "1" + "\n"
+
+        for _ in range(100):
+            self.log.debug('Warmup> Sending benchmark flag')
+            self.con.send(slave_input_flag.encode('utf-8'))
+            self.log.debug('Warmup> Sent benchmark flag')
+
+            self.log.debug('Warmup> Sending permutation')
+            self.con.send(slave_input_perm.encode('ascii'))
+            self.log.debug('Warmup> Sent permutation')
+            t = self.con.recv(BUFFER_SIZE)
+
+
+
     def seed_configurations(self):
         """
         Look for seed configuration permutation in file 'seed_permutation.txt'.
@@ -125,17 +146,24 @@ class Mapper(MeasurementInterface):
                  'Perm_reversed' : (list(range(self.processes))).reverse()}]
         """
         if self.seed_file != 'not set':
+            seeds = []
             try:
-                p = []
                 with open(self.seed_file, 'r') as f:
-                    for line in f:
-                        p.append(int(line))
-
-                return self.translate_permutation_to_config(p)
+                    seeds = json.load(f)
+                print(seeds)
+                #return self.translate_permutation_to_config(p)
             except RuntimeError:
-                p = list(range(self.processes))
-
-                return self.translate_permutation_to_config(p)
+                pass
+                #p = list(range(self.processes))
+                #return self.translate_permutation_to_config(p)
+            p = [-1 for _ in range(self.processes)]
+            l_ppn = self.G.getNumVertices() // self.n_nodes
+            for node in range(self.n_nodes):
+                for core in range(l_ppn):
+                    p[self.pps * self.n_sockets * node + core] = l_ppn * node + core
+            seeds.append({'Perm': p})
+            print('Appended Blocked')
+            return seeds
         else:
             """Hyperplane Permutation 16x16"""
             # p = [0, 16, 32, 48, 1, 17, 33, 49, 2, 18, 34, 50, 3, 19, 35, 51, 4, 20, 36, 52, 5, 21, 37, 53, 6, 22, 38, 54, 7, 23, 39, 55, 64, 80, 96, 112, 65, 81, 97, 113, 66, 82, 98, 114, 67, 83, 99, 115, 68, 84, 100, 116, 69, 85, 101, 117, 70, 86, 102, 118, 71, 87, 103, 119, 8, 24, 40, 56, 9, 25, 41, 57, 10, 26, 42, 58, 11, 27, 43, 59, 12, 28, 44, 60, 13, 29, 45, 61, 14, 30, 46, 62, 15, 31, 47, 63, 72, 88, 104, 120, 73, 89, 105, 121, 74, 90, 106, 122, 75, 91, 107, 123, 76, 92, 108, 124, 77, 93, 109, 125, 78, 94, 110, 126, 79, 95, 111, 127, 128, 144, 160, 176, 129, 145, 161, 177, 130, 146, 162, 178, 131, 147, 163, 179, 132, 148, 164, 180, 133, 149, 165, 181, 134, 150, 166, 182, 135, 151, 167, 183, 192, 208, 224, 240, 193, 209, 225, 241, 194, 210, 226, 242, 195, 211, 227, 243, 196, 212, 228, 244, 197, 213, 229, 245, 198, 214, 230, 246, 199, 215, 231, 247, 136, 152, 168, 184, 137, 153, 169, 185, 138, 154, 170, 186, 139, 155, 171, 187, 140, 156, 172, 188, 141, 157, 173, 189, 142, 158, 174, 190, 143, 159, 175, 191, 200, 216, 232, 248, 201, 217, 233, 249, 202, 218, 234, 250, 203, 219, 235, 251, 204, 220, 236, 252, 205, 221, 237, 253, 206, 222, 238, 254, 207, 223, 239, 255]
