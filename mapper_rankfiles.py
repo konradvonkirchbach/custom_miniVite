@@ -48,7 +48,8 @@ class Mapper(MeasurementInterface):
     def __init__(self, args):
         self.log.setLevel(level=args.logging_level)
         super(Mapper, self).__init__(args)
-        self.benchmarkOutputs = {}
+        self.benchmarkOutputs = []
+        self.seenPermutations = set()
         self.processes = N * PPN
         self.n_nodes = N
         self.ppn = PPN
@@ -80,15 +81,16 @@ class Mapper(MeasurementInterface):
         cfg = desired_result.configuration.data
         p = cfg['Perm']
         hashKey = utils.hash_permutation(p, 2, self.n_nodes, self.ppn // 2)
-        if hashKey in self.benchmarkOutputs.keys():
+        if hashKey in self.seenPermutations:
             return opentuner.resultsdb.models.Result(time=np.inf)
+        self.seenPermutations.add(hashKey)
         t = self.run_benchmark(p)
         try:
             grid = utils.mapping_from_permutation(p, utils.getCartDims(self.processes), [self.ppn]*self.n_nodes)
-            bottleneck, sum = utils.analyze_matrix(grid, self.stencil)
+            bottleneck, total = utils.analyze_matrix(grid, self.stencil)
         except:
-            bottleneck, sum = -1, -1
-        self.benchmarkOutputs[hashKey] = (p, t, bottleneck, sum)
+            bottleneck, total = -1, -1
+        self.benchmarkOutputs.append((p, float(t), int(bottleneck), int(total)))
         return opentuner.resultsdb.models.Result(time=t)
 
 
@@ -189,8 +191,8 @@ class Mapper(MeasurementInterface):
 
 
     def save_final_config(self, configuration):
-        global PERMUTATION
-        ALL_VALUES['{}:{}'.format(self.n_nodes, self.ppn)] = self.benchmarkOutputs
+        global ALL_VALUES
+        ALL_VALUES['{} {}'.format(int(self.n_nodes), int(self.ppn))] = self.benchmarkOutputs
         print("Best found = {}".format(configuration.data))
 
 
@@ -213,8 +215,13 @@ def main(args):
         PERMUTATION = permutation
         Mapper.main(args)
 
-    with open('allConfigurationsOutput.json', 'w') as f:
-        json.dump(PERMUTATION, f)
+    with open('allConfigurationsOutput.csv', 'w') as f:
+        f.write('Number of Nodes, Processes per Node, Permutation, Time, Bottleneck, Total\n')
+        for key, val in ALL_VALUES.items():
+            keyItems = key.split(' ')
+            for data in val:
+                data = [str(i) for i in data]
+            f.write(','.join(keyItems + data) + '\n')
 
 if __name__ == '__main__':
     args = parser.parse_args()
