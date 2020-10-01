@@ -217,11 +217,15 @@ def main(args):
 
     with open('allConfigurationsOutput.csv', 'w') as f:
         f.write('Number of Nodes, Processes per Node, Permutation, Time, Bottleneck, Total\n')
+        #key: String -> N_NODES, PPN, val -> array of tuples
         for key, val in ALL_VALUES.items():
             keyItems = key.split(' ')
             for data in val:
                 data = [str(i) for i in data]
-            f.write(','.join(keyItems + data) + '\n')
+                f.write(';'.join(keyItems + data) + '\n')
+
+    with open('dataBackUp.txt', 'w') as f:
+        f.write(str(ALL_VALUES))
 
 if __name__ == '__main__':
     args = parser.parse_args()
