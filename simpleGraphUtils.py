@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import simpleGraph as sG
 from matplotlib.colors import LogNorm
 
-def plotGraphAsMatrix(G, colorMap='BuGn'):
+def plotGraphAsMatrix(G, colorMap='BuGn', filename=None):
     """
     Assumes that G is a simple graph.
     Will plot G as matrix with imshow
@@ -15,4 +15,8 @@ def plotGraphAsMatrix(G, colorMap='BuGn'):
             mat[v][neighbor] += intensity
             mat[neighbor][v] += intensity
     plt.imshow(mat, norm=LogNorm(), cmap = colorMap)
-    plt.show()
+    if not filename == None:
+        plt.savefig(filename, format='pdf')
+    else:
+        plt.show()
+

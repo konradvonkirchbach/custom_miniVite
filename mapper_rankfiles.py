@@ -216,7 +216,7 @@ def main(args):
         Mapper.main(args)
 
     with open('allConfigurationsOutput.csv', 'w') as f:
-        f.write('Number of Nodes, Processes per Node, Permutation, Time, Bottleneck, Total\n')
+        f.write('Number of Nodes; Processes per Node; Permutation; Time; Bottleneck; Total\n')
         #key: String -> N_NODES, PPN, val -> array of tuples
         for key, val in ALL_VALUES.items():
             keyItems = key.split(' ')
